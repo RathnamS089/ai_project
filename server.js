@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const path = require("path");
+const fs = require("fs");
 const mysql = require("mysql2/promise");
 const pdf = require("pdf-parse");
 require("dotenv").config();
@@ -43,21 +44,30 @@ app.use(express.urlencoded({ extended: true }));
 // ── MySQL Config ─────────────────────────────────────────────────────────────
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
+  port: parseInt(process.env.DB_PORT, 10) || 3306,
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASS || "",
   database: process.env.DB_NAME || "adaptive_learning",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  ssl: process.env.DB_HOST && process.env.DB_HOST.includes('tidbcloud.com') ? {
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true
+  } : null
 });
 
-// Verify Database Connection on startup
-pool.query('SELECT 1').then(() => {
-  console.log("Database connected successfully! 🗄️ ✅");
-}).catch(err => {
-  console.error("❌ Database Connection Error:", err.message);
-  console.warn("💡 Tip: Ensure MySQL is running and your DB_USER/DB_PASS in .env are correct.");
-});
+// Verify Database Connection (non-blocking for Vercel startup)
+const checkConnection = async () => {
+  try {
+    await pool.query('SELECT 1');
+    console.log("Database connected successfully! 🗄️ ✅");
+  } catch (err) {
+    console.error("❌ Database Connection Warning:", err.message);
+    console.warn("💡 Tip: Ensure your TiDB Cloud credentials are correct in Vercel environment variables.");
+  }
+};
+checkConnection();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function hashPassword(password) {
@@ -70,7 +80,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/favicon.ico", (req, res) => {
-  res.sendFile(path.join(__dirname, "static", "favicon.ico"));
+  res.status(204).end(); // No content for favicon
 });
 
 // ── REGISTER ─────────────────────────────────────────────────────────────────
@@ -670,6 +680,11 @@ app.post("/api/chat", async (req, res) => {
 
 // ── RUN ──────────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT, 10) || 8000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
